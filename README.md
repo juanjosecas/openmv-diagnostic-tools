@@ -18,13 +18,15 @@ openmv-diagnostic-tools/
 │   ├── 06_fps_camara.py
 │   ├── 07_grabacion_mjpeg.py
 │   ├── 08_estabilidad.py
+│   ├── 09_grabacion_telemetria.py
 │   └── grabacion_robusta.py
 ├── windows/
 │   ├── 09_diagnostico_windows_openmv.ps1
 │   └── 10_monitor_usb_openmv.ps1
 ├── docs/
 │   ├── protocolo_diagnostico.md
-│   └── interpretacion_resultados.md
+│   ├── interpretacion_resultados.md
+│   └── arbol_decision.md
 └── original/
     └── script_esteban_original.py
 ```
@@ -42,12 +44,12 @@ Ejecutar los scripts OpenMV en este orden:
 7. `07_grabacion_mjpeg.py`
 8. `08_estabilidad.py`
 
-Después ejecutar las herramientas de Windows:
+Si todo lo anterior funciona y el problema sigue siendo intermitente:
 
-9. `09_diagnostico_windows_openmv.ps1`
-10. `10_monitor_usb_openmv.ps1`
+9. ejecutar `openmv/09_grabacion_telemetria.py`;
+10. al mismo tiempo ejecutar `windows/10_monitor_usb_openmv.ps1`.
 
-No conviene ejecutar todo junto. Si una prueba falla, registrar el mensaje completo antes de cambiar firmware, drivers o hardware.
+No conviene ejecutar todas las pruebas juntas desde el principio. Cada script está pensado para aislar una capa concreta.
 
 ## Qué prueba cada capa
 
@@ -61,6 +63,7 @@ No conviene ejecutar todo junto. Si una prueba falla, registrar el mensaje compl
 | `06_fps_camara.py` | rendimiento de captura sin SD | sensor / configuración / firmware |
 | `07_grabacion_mjpeg.py` | captura + escritura MJPEG | interacción sensor + SD |
 | `08_estabilidad.py` | funcionamiento prolongado | fallas intermitentes / alimentación / temperatura |
+| `09_grabacion_telemetria.py` | grabación real + CSV persistente | reconstrucción del fallo aunque el IDE muera |
 | `09_diagnostico_windows_openmv.ps1` | inventario USB, drivers y eventos | Windows / USB / drivers |
 | `10_monitor_usb_openmv.ps1` | cambios USB durante el experimento | desconexiones o reinicios intermitentes |
 
@@ -69,6 +72,33 @@ No conviene ejecutar todo junto. Si una prueba falla, registrar el mensaje compl
 `openmv/grabacion_robusta.py` es una versión instrumentada del script original. Mantiene la lógica general de grabación MJPEG y agrega comprobación de espacio libre real, separación de errores de captura y escritura, métricas de rendimiento, control de memoria, cierre compatible de MJPEG y mensajes diagnósticos.
 
 Durante diagnóstico se evita reiniciar automáticamente la cámara para que la consola conserve el error.
+
+## Grabación con telemetría persistente
+
+`openmv/09_grabacion_telemetria.py` está pensada para el caso en el que OpenMV IDE deja de responder pero no sabemos si la cámara siguió ejecutando el script.
+
+Genera dos archivos:
+
+```text
+diagnostico_video.mjpeg
+diagnostico_telemetria.csv
+```
+
+El CSV registra periódicamente:
+
+```text
+time_s
+frames
+fps
+capture_ms_avg
+write_ms_avg
+write_ms_max
+heap_free
+free_mb
+status
+```
+
+Si el IDE queda congelado pero el CSV y el MJPEG siguen creciendo, la cámara sigue ejecutando. En ese caso la sospecha pasa hacia USB, debug framebuffer, OpenMV IDE o firmware de comunicación.
 
 ## Uso en Windows
 
@@ -92,8 +122,41 @@ Para comparar estados, conviene guardar tres diagnósticos:
 - cámara conectada y funcionando;
 - inmediatamente después del fallo.
 
+## Caso de uso crítico: IDE congelado pero video grabado
+
+Si ocurre:
+
+```text
+OpenMV IDE: sin imagen / FPS 0
+MJPEG: continúa creciendo
+CSV de telemetría: continúa creciendo
+VLC: reproduce el archivo final
+```
+
+no corresponde concluir que la cámara se colgó. El proceso de adquisición y escritura sigue funcionando y el fallo está más probablemente en la capa de comunicación/debug/IDE.
+
+Si, además, el monitor de Windows registra una desconexión USB, priorizar cable, puerto, administración de energía, firmware USB/debug y hardware USB de la placa.
+
+## Archivos MJPEG muy grandes
+
+Un archivo de varios GB no demuestra por sí mismo corrupción. Primero verificar en el CSV:
+
+- cuánto tiempo grabó realmente;
+- cuántos frames acumuló;
+- FPS efectivo;
+- si el tiempo de escritura aumentó;
+- si la grabación siguió mucho después de que el IDE dejó de mostrar imagen.
+
+## Árbol de decisión
+
+Ver [`docs/arbol_decision.md`](docs/arbol_decision.md). Incluye un diagrama Mermaid y una versión textual para decidir qué prueba ejecutar según el resultado anterior.
+
 ## Regla principal
 
 No asumir que un cuelgue de OpenMV IDE implica que la cámara dejó de grabar. Si el archivo de la microSD continúa creciendo mientras el IDE pierde conexión, el problema está probablemente en USB/Windows/IDE. Si la grabación también se detiene, el problema está más cerca de sensor, firmware, almacenamiento, alimentación o script.
 
-Ver `docs/protocolo_diagnostico.md` para el procedimiento completo.
+Ver también:
+
+- [`docs/protocolo_diagnostico.md`](docs/protocolo_diagnostico.md)
+- [`docs/interpretacion_resultados.md`](docs/interpretacion_resultados.md)
+- [`docs/arbol_decision.md`](docs/arbol_decision.md)
