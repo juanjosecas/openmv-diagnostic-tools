@@ -4,6 +4,67 @@ Toolkit de diagnóstico para cámaras OpenMV y su interacción con Windows.
 
 El objetivo es aislar fallas por capas: firmware/runtime, sensor, memoria, almacenamiento, rendimiento de captura, escritura MJPEG, estabilidad prolongada y comunicación USB con Windows.
 
+## Descargar este repositorio sin usar Git
+
+No hace falta instalar `git`, `gh`, GitHub Desktop ni ninguna otra herramienta.
+
+### Opción recomendada: descargar todo como ZIP
+
+1. Abrir en el navegador:
+
+   `https://github.com/juanjosecas/openmv-diagnostic-tools`
+
+2. Presionar el botón verde **Code**.
+3. Elegir **Download ZIP**.
+4. Esperar a que termine la descarga.
+5. Abrir la carpeta de Descargas de Windows.
+6. Buscar un archivo similar a:
+
+   ```text
+   openmv-diagnostic-tools-main.zip
+   ```
+
+7. Hacer clic derecho sobre el ZIP y elegir **Extraer todo...**.
+8. Abrir la carpeta extraída:
+
+   ```text
+   openmv-diagnostic-tools-main
+   ```
+
+Dentro estarán las carpetas `openmv`, `windows`, `docs` y `original`.
+
+### Qué archivo usar después de descargar
+
+Los scripts que se ejecutan dentro de la cámara están en:
+
+```text
+openmv-diagnostic-tools-main\openmv\
+```
+
+Los scripts de diagnóstico de Windows están en:
+
+```text
+openmv-diagnostic-tools-main\windows\
+```
+
+La documentación está en:
+
+```text
+openmv-diagnostic-tools-main\docs\
+```
+
+### Descargar sólo un archivo
+
+Si sólo se necesita un script:
+
+1. Abrir el repositorio en el navegador.
+2. Entrar en la carpeta correspondiente, por ejemplo `openmv`.
+3. Hacer clic sobre el archivo deseado, por ejemplo `01_versiones.py`.
+4. Presionar **Raw** o **Download raw file**.
+5. Guardar el archivo manteniendo su extensión original (`.py`, `.ps1`, `.md`, etc.).
+
+Para alguien que no usa GitHub habitualmente, es preferible descargar el ZIP completo. Así se conservan todas las herramientas y la documentación juntas.
+
 ## Estructura
 
 ```text
