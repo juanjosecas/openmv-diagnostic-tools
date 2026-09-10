@@ -3,6 +3,7 @@
 *.log
 *.bin
 *.txt
+*.csv
 
 # Python cache
 __pycache__/
