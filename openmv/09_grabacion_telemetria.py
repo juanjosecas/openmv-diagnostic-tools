@@ -2,16 +2,12 @@
 # 09_grabacion_telemetria.py
 #
 # OBJETIVO:
-# Grabar MJPEG y, en paralelo, guardar telemetría en CSV para
-# reconstruir qué ocurrió incluso si OpenMV IDE deja de responder.
+# Grabar MJPEG y guardar telemetría persistente para reconstruir
+# qué ocurrió incluso si OpenMV IDE deja de responder.
 #
 # SALIDAS:
 #   diagnostico_video.mjpeg
 #   diagnostico_telemetria.csv
-#
-# El CSV se actualiza cada pocos segundos y registra:
-# tiempo, frames, FPS, tiempos de captura/escritura, heap y
-# espacio libre.
 # ============================================================
 
 import sensor
@@ -25,7 +21,8 @@ LOG_FILE = "diagnostico_telemetria.csv"
 
 FPS_OBJETIVO = 15
 DURACION_MINUTOS = 30
-REPORTE_CADA_SEGUNDOS = 10
+REPORTE_CADA_SEGUNDOS = 5
+SYNC_MJPEG_CADA_SEGUNDOS = 30
 MIN_FREE_SPACE_MB = 100
 
 
@@ -39,7 +36,6 @@ def free_mb():
 
 def heap_free():
     try:
-        gc.collect()
         return gc.mem_free()
     except Exception:
         return -1
@@ -50,6 +46,39 @@ def safe_flush(f):
         f.flush()
     except Exception:
         pass
+    try:
+        if hasattr(os, "sync"):
+            os.sync()
+    except Exception:
+        pass
+
+
+def safe_mjpeg_sync(m):
+    try:
+        if hasattr(m, "sync"):
+            m.sync()
+            return 1
+    except Exception:
+        return 0
+    return 0
+
+
+def mjpeg_size(m):
+    try:
+        if hasattr(m, "size"):
+            return m.size()
+    except Exception:
+        pass
+    return -1
+
+
+def mjpeg_count(m, fallback):
+    try:
+        if hasattr(m, "count"):
+            return m.count()
+    except Exception:
+        pass
+    return fallback
 
 
 def close_mjpeg(m):
@@ -68,7 +97,6 @@ if FPS_OBJETIVO <= 0:
 
 espacio_inicial = free_mb()
 print("Espacio libre inicial: %.2f MB" % espacio_inicial)
-
 if espacio_inicial >= 0 and espacio_inicial < MIN_FREE_SPACE_MB:
     raise RuntimeError("Espacio libre insuficiente")
 
@@ -84,20 +112,23 @@ print("Telemetria:", LOG_FILE)
 m = mjpeg.Mjpeg(VIDEO_FILE)
 log = open(LOG_FILE, "w")
 
-log.write("time_s,frames,fps,capture_ms_avg,write_ms_avg,write_ms_max,heap_free,free_mb,status\n")
+log.write("time_s,frames,mjpeg_count,fps,capture_ms_avg,capture_ms_max,write_ms_avg,write_ms_max,mjpeg_size_bytes,heap_free,free_mb,mjpeg_sync,status\n")
 safe_flush(log)
 
 start = time.ticks_ms()
 last_report_ms = start
+last_sync_ms = start
 intervalo_ms = 1000 // FPS_OBJETIVO
 max_duration_ms = DURACION_MINUTOS * 60 * 1000
 
 frames = 0
 capture_total = 0
 write_total = 0
+capture_max = 0
 write_max = 0
 status = "RUNNING"
 error_text = ""
+last_sync_result = -1
 
 try:
     while time.ticks_diff(time.ticks_ms(), start) <= max_duration_ms:
@@ -126,6 +157,8 @@ try:
         frames += 1
         capture_total += capture_ms
         write_total += write_ms
+        if capture_ms > capture_max:
+            capture_max = capture_ms
         if write_ms > write_max:
             write_max = write_ms
 
@@ -134,6 +167,11 @@ try:
             time.sleep_ms(intervalo_ms - cycle_ms)
 
         now = time.ticks_ms()
+
+        if time.ticks_diff(now, last_sync_ms) >= SYNC_MJPEG_CADA_SEGUNDOS * 1000:
+            last_sync_ms = now
+            last_sync_result = safe_mjpeg_sync(m)
+
         if time.ticks_diff(now, last_report_ms) >= REPORTE_CADA_SEGUNDOS * 1000:
             last_report_ms = now
             elapsed_s = time.ticks_diff(now, start) / 1000
@@ -143,23 +181,33 @@ try:
             heap = heap_free()
             space = free_mb()
 
-            line = "%.1f,%d,%.2f,%.2f,%.2f,%d,%d,%.2f,%s\n" % (
+            line = "%.1f,%d,%d,%.2f,%.2f,%d,%.2f,%d,%d,%d,%.2f,%d,%s\n" % (
                 elapsed_s,
                 frames,
+                mjpeg_count(m, frames),
                 fps,
                 capture_avg,
+                capture_max,
                 write_avg,
                 write_max,
+                mjpeg_size(m),
                 heap,
                 space,
+                last_sync_result,
                 status,
             )
 
             log.write(line)
             safe_flush(log)
 
-            print("t=%.1fs | frames=%d | fps=%.2f | cap=%.2f ms | write=%.2f ms | free=%.2f MB" % (
-                elapsed_s, frames, fps, capture_avg, write_avg, space
+            print("t=%.1fs | frames=%d | fps=%.2f | cap=%.2f ms | write=%.2f ms | size=%d | free=%.2f MB" % (
+                elapsed_s,
+                frames,
+                fps,
+                capture_avg,
+                write_avg,
+                mjpeg_size(m),
+                space,
             ))
 
             if space >= 0 and space < MIN_FREE_SPACE_MB:
@@ -178,6 +226,7 @@ finally:
     write_avg = write_total / frames if frames > 0 else 0
 
     try:
+        safe_mjpeg_sync(m)
         close_mjpeg(m)
     except Exception as e:
         if status == "RUNNING":
@@ -188,15 +237,19 @@ finally:
         status = "COMPLETED"
 
     try:
-        log.write("%.1f,%d,%.2f,%.2f,%.2f,%d,%d,%.2f,%s\n" % (
+        log.write("%.1f,%d,%d,%.2f,%.2f,%d,%.2f,%d,%d,%d,%.2f,%d,%s\n" % (
             elapsed_s,
             frames,
+            mjpeg_count(m, frames),
             fps,
             capture_avg,
+            capture_max,
             write_avg,
             write_max,
+            mjpeg_size(m),
             heap_free(),
             free_mb(),
+            last_sync_result,
             status,
         ))
         if error_text:
