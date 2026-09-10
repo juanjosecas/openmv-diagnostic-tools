@@ -2,7 +2,7 @@
 
 Toolkit de diagnóstico para cámaras OpenMV y su interacción con Windows.
 
-El objetivo es aislar fallas por capas: firmware/runtime, sensor, memoria, almacenamiento, rendimiento de captura, escritura MJPEG, estabilidad prolongada y comunicación USB con Windows.
+El objetivo es aislar fallas por capas: firmware/runtime, sensor, memoria, almacenamiento, rendimiento de captura, escritura MJPEG, `stdio`, framebuffer, protocolo de debug, USB y OpenMV IDE.
 
 ## Descargar este repositorio sin usar Git
 
@@ -18,52 +18,30 @@ No hace falta instalar `git`, `gh`, GitHub Desktop ni ninguna otra herramienta.
 3. Elegir **Download ZIP**.
 4. Esperar a que termine la descarga.
 5. Abrir la carpeta de Descargas de Windows.
-6. Buscar un archivo similar a:
+6. Buscar:
 
    ```text
    openmv-diagnostic-tools-main.zip
    ```
 
-7. Hacer clic derecho sobre el ZIP y elegir **Extraer todo...**.
-8. Abrir la carpeta extraída:
+7. Clic derecho → **Extraer todo...**.
+8. Abrir:
 
    ```text
    openmv-diagnostic-tools-main
    ```
 
-Dentro estarán las carpetas `openmv`, `windows`, `docs` y `original`.
-
-### Qué archivo usar después de descargar
-
-Los scripts que se ejecutan dentro de la cámara están en:
-
-```text
-openmv-diagnostic-tools-main\openmv\
-```
-
-Los scripts de diagnóstico de Windows están en:
-
-```text
-openmv-diagnostic-tools-main\windows\
-```
-
-La documentación está en:
-
-```text
-openmv-diagnostic-tools-main\docs\
-```
+Los scripts para la cámara están en `openmv`, las herramientas Windows en `windows`, el analizador para PC en `pc` y la documentación en `docs`.
 
 ### Descargar sólo un archivo
 
-Si sólo se necesita un script:
-
-1. Abrir el repositorio en el navegador.
-2. Entrar en la carpeta correspondiente, por ejemplo `openmv`.
-3. Hacer clic sobre el archivo deseado, por ejemplo `01_versiones.py`.
+1. Abrir el repositorio.
+2. Entrar en la carpeta correspondiente.
+3. Abrir el archivo.
 4. Presionar **Raw** o **Download raw file**.
-5. Guardar el archivo manteniendo su extensión original (`.py`, `.ps1`, `.md`, etc.).
+5. Guardarlo conservando la extensión (`.py`, `.ps1`, `.md`).
 
-Para alguien que no usa GitHub habitualmente, es preferible descargar el ZIP completo. Así se conservan todas las herramientas y la documentación juntas.
+Para alguien que no usa GitHub habitualmente, descargar el ZIP completo es más simple y evita dejar documentación o herramientas afuera.
 
 ## Estructura
 
@@ -80,144 +58,225 @@ openmv-diagnostic-tools/
 │   ├── 07_grabacion_mjpeg.py
 │   ├── 08_estabilidad.py
 │   ├── 09_grabacion_telemetria.py
+│   ├── 10_framebuffer_off_test.py
+│   ├── 11_console_heartbeat.py
+│   ├── 12_grabacion_debug_controlado.py
 │   └── grabacion_robusta.py
 ├── windows/
 │   ├── 09_diagnostico_windows_openmv.ps1
 │   └── 10_monitor_usb_openmv.ps1
+├── pc/
+│   └── analizar_telemetria.py
 ├── docs/
 │   ├── protocolo_diagnostico.md
 │   ├── interpretacion_resultados.md
-│   └── arbol_decision.md
+│   ├── arbol_decision.md
+│   └── referencias.md
 └── original/
     └── script_esteban_original.py
 ```
 
+## Caso que motivó la ampliación del diagnóstico
+
+Se observó un patrón particularmente informativo:
+
+```text
+OpenMV IDE deja de reportar actividad aproximadamente durante la grabación
+pero la cámara continúa escribiendo el MJPEG
+el archivo final aparece y es reproducible
+el problema se observó en más de una PC
+```
+
+Eso obliga a separar dos preguntas:
+
+1. ¿la cámara dejó de ejecutar el script?
+2. ¿o solamente dejó de funcionar correctamente alguna parte de la comunicación IDE/debug/preview?
+
+Las herramientas nuevas están diseñadas para distinguir esos casos.
+
 ## Orden recomendado
 
-Ejecutar los scripts OpenMV en este orden:
+Primero las pruebas que aíslan componentes:
 
-1. `01_versiones.py`
-2. `02_sensor_camara.py`
-3. `03_memoria.py`
-4. `04_sd_info.py`
-5. `05_sd_escritura.py`
-6. `06_fps_camara.py`
-7. `07_grabacion_mjpeg.py`
-8. `08_estabilidad.py`
+1. `01_versiones.py` — firmware, placa y APIs disponibles.
+2. `02_sensor_camara.py` — sensor sin SD.
+3. `03_memoria.py` — heap MicroPython.
+4. `04_sd_info.py` — filesystem y espacio libre.
+5. `05_sd_escritura.py` — escritura sin cámara.
+6. `06_fps_camara.py` — FPS del sensor sin MJPEG.
+7. `11_console_heartbeat.py` — sólo terminal/debug, sin cámara ni SD.
+8. `07_grabacion_mjpeg.py` — captura + MJPEG instrumentado.
+9. `08_estabilidad.py` — captura prolongada.
 
-Si todo lo anterior funciona y el problema sigue siendo intermitente:
+Si el problema sigue siendo intermitente:
 
-9. ejecutar `openmv/09_grabacion_telemetria.py`;
-10. al mismo tiempo ejecutar `windows/10_monitor_usb_openmv.ps1`.
+10. ejecutar `09_grabacion_telemetria.py`;
+11. simultáneamente ejecutar `windows/10_monitor_usb_openmv.ps1`;
+12. si el IDE falla pero la cámara sigue trabajando, probar `10_framebuffer_off_test.py` en firmware compatible;
+13. ejecutar `12_grabacion_debug_controlado.py` como ensayo A/B con framebuffer activo/inactivo cuando la API lo permita.
 
-No conviene ejecutar todas las pruebas juntas desde el principio. Cada script está pensado para aislar una capa concreta.
+No ejecutar todo junto desde el principio. Cada prueba está pensada para eliminar hipótesis.
 
-## Qué prueba cada capa
+## Qué prueba cada herramienta
 
-| Script | Qué prueba | Si falla, sospechar |
+| Herramienta | Qué prueba | Si falla o cambia el resultado |
 |---|---|---|
-| `01_versiones.py` | runtime y módulos básicos | firmware / instalación OpenMV |
-| `02_sensor_camara.py` | captura repetida sin SD | sensor / firmware / hardware |
-| `03_memoria.py` | heap MicroPython | presión o fragmentación de memoria |
-| `04_sd_info.py` | filesystem y espacio libre | SD / montaje / filesystem |
-| `05_sd_escritura.py` | escritura sostenida sin cámara | SD / almacenamiento |
-| `06_fps_camara.py` | rendimiento de captura sin SD | sensor / configuración / firmware |
-| `07_grabacion_mjpeg.py` | captura + escritura MJPEG | interacción sensor + SD |
-| `08_estabilidad.py` | funcionamiento prolongado | fallas intermitentes / alimentación / temperatura |
-| `09_grabacion_telemetria.py` | grabación real + CSV persistente | reconstrucción del fallo aunque el IDE muera |
-| `09_diagnostico_windows_openmv.ps1` | inventario USB, drivers y eventos | Windows / USB / drivers |
-| `10_monitor_usb_openmv.ps1` | cambios USB durante el experimento | desconexiones o reinicios intermitentes |
+| `01_versiones.py` | firmware, placa, runtime y APIs | incompatibilidad/versionado |
+| `02_sensor_camara.py` | captura sin SD | sensor/firmware/hardware |
+| `03_memoria.py` | heap MicroPython | presión/fragmentación de memoria |
+| `04_sd_info.py` | filesystem/espacio | SD/montaje/filesystem |
+| `05_sd_escritura.py` | escritura sin sensor | SD/almacenamiento |
+| `06_fps_camara.py` | rendimiento base del sensor | sensor/firmware/configuración |
+| `11_console_heartbeat.py` | `stdio`/debug sin sensor ni SD | IDE/debug/comunicación |
+| `07_grabacion_mjpeg.py` | captura + escritura MJPEG | interacción sensor/SD/MJPEG |
+| `08_estabilidad.py` | captura prolongada | fallos intermitentes |
+| `09_grabacion_telemetria.py` | grabación + CSV persistente | reconstrucción posterior al cuelgue del IDE |
+| `10_framebuffer_off_test.py` | elimina preview/framebuffer como variable | framebuffer/debug |
+| `12_grabacion_debug_controlado.py` | grabación con log persistente y controles de debug | comparación A/B reproducible |
+| `09_diagnostico_windows_openmv.ps1` | USB, COM, drivers, eventos | Windows/USB/driver/energía |
+| `10_monitor_usb_openmv.ps1` | desconexiones durante el experimento | USB físico/lógico |
+| `pc/analizar_telemetria.py` | análisis automático del CSV | gaps, caída de FPS, escritura lenta |
 
-## Grabación robusta
+## `grabacion_robusta.py`
 
-`openmv/grabacion_robusta.py` es una versión instrumentada del script original. Mantiene la lógica general de grabación MJPEG y agrega comprobación de espacio libre real, separación de errores de captura y escritura, métricas de rendimiento, control de memoria, cierre compatible de MJPEG y mensajes diagnósticos.
+Es la versión corregida para uso práctico del script original. Mantiene una configuración simple de grabación pero agrega:
 
-Durante diagnóstico se evita reiniciar automáticamente la cámara para que la consola conserve el error.
+- espacio libre real;
+- captura y escritura medidas por separado;
+- log persistente independiente de la consola del IDE;
+- `flush()` del log;
+- `os.sync()` cuando existe;
+- `Mjpeg.sync()` cuando la API lo soporta;
+- `Mjpeg.size()` y `Mjpeg.count()` cuando están disponibles;
+- heartbeat de consola deliberadamente poco frecuente;
+- separación entre errores de captura, escritura y cierre;
+- opción A/B para desactivar framebuffer en firmware que todavía exponga `omv.disable_fb()`;
+- sin reinicio automático al terminar, para no destruir evidencia.
 
-## Grabación con telemetría persistente
+## Prueba específica de consola/debug
 
-`openmv/09_grabacion_telemetria.py` está pensada para el caso en el que OpenMV IDE deja de responder pero no sabemos si la cámara siguió ejecutando el script.
+`openmv/11_console_heartbeat.py` no usa sensor ni SD. Sólo imprime un contador una vez por segundo durante 20 minutos.
 
-Genera dos archivos:
+Si deja de reportar aproximadamente al mismo tiempo que el script de video, ya no tiene sentido culpar a la microSD o a `mjpeg.add_frame()` como explicación única.
+
+## Prueba específica del framebuffer
+
+`openmv/10_framebuffer_off_test.py` intenta ejecutar una prueba con el streaming del framebuffer desactivado desde la cámara.
+
+Esto es especialmente útil para firmware 4.7.x, donde OpenMV documentaba `omv.disable_fb()`.
+
+**Importante:** OpenMV eliminó `omv.disable_fb()` en firmware 4.8.0. El script comprueba primero si la función existe y no intenta usarla si no está disponible.
+
+Por eso no hay que copiar esta prueba ciegamente después de actualizar firmware.
+
+## Telemetría persistente
+
+`openmv/09_grabacion_telemetria.py` genera:
 
 ```text
 diagnostico_video.mjpeg
 diagnostico_telemetria.csv
 ```
 
-El CSV registra periódicamente:
+Registra periódicamente, cuando las APIs están disponibles:
 
 ```text
 time_s
 frames
+mjpeg_count
 fps
 capture_ms_avg
+capture_ms_max
 write_ms_avg
 write_ms_max
+mjpeg_size_bytes
 heap_free
 free_mb
+mjpeg_sync
 status
 ```
 
-Si el IDE queda congelado pero el CSV y el MJPEG siguen creciendo, la cámara sigue ejecutando. En ese caso la sospecha pasa hacia USB, debug framebuffer, OpenMV IDE o firmware de comunicación.
+El CSV se fuerza al almacenamiento periódicamente. La idea es poder responder después del experimento:
 
-## Uso en Windows
+- ¿cuánto tiempo siguió vivo el script?
+- ¿cuántos frames añadió?
+- ¿cayó el FPS?
+- ¿aumentó el tiempo de escritura?
+- ¿el MJPEG siguió creciendo después de que desaparecieron los mensajes del IDE?
 
-Abrir PowerShell en la carpeta `windows/`.
+## Analizar el CSV en la PC
+
+Requiere Python 3.10+ y sólo usa biblioteca estándar:
+
+```bash
+python pc/analizar_telemetria.py diagnostico_telemetria.csv
+```
+
+Busca, entre otras cosas, gaps grandes entre registros, caída de FPS y predominio del tiempo de escritura sobre captura.
+
+## Windows
 
 Diagnóstico puntual:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\09_diagnostico_windows_openmv.ps1 *> diagnostico_openmv_windows.txt
+powershell -ExecutionPolicy Bypass -File .\windows\09_diagnostico_windows_openmv.ps1 *> diagnostico_openmv_windows.txt
 ```
 
-Monitor de conexión durante un experimento:
+Monitor durante la grabación:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\10_monitor_usb_openmv.ps1
+powershell -ExecutionPolicy Bypass -File .\windows\10_monitor_usb_openmv.ps1
 ```
 
-Para comparar estados, conviene guardar tres diagnósticos:
+Conviene comparar tres estados:
 
 - cámara desconectada;
 - cámara conectada y funcionando;
 - inmediatamente después del fallo.
 
-## Caso de uso crítico: IDE congelado pero video grabado
+## Cómo interpretar el síntoma actual
 
 Si ocurre:
 
 ```text
-OpenMV IDE: sin imagen / FPS 0
-MJPEG: continúa creciendo
-CSV de telemetría: continúa creciendo
-VLC: reproduce el archivo final
+IDE: deja de reportar
+MJPEG: sigue creciendo
+telemetría: sigue creciendo
+video final: reproducible
 ```
 
-no corresponde concluir que la cámara se colgó. El proceso de adquisición y escritura sigue funcionando y el fallo está más probablemente en la capa de comunicación/debug/IDE.
+entonces la ausencia de actividad en la pantalla no demuestra que la cámara haya dejado de ejecutar.
 
-Si, además, el monitor de Windows registra una desconexión USB, priorizar cable, puerto, administración de energía, firmware USB/debug y hardware USB de la placa.
+Si además Windows mantiene el dispositivo USB presente, la hipótesis de IDE/debug/framebuffer/stdio gana fuerza.
 
-## Archivos MJPEG muy grandes
+Si Windows registra desconexión/reconexión al mismo tiempo, priorizar cable, puerto, power management, driver, firmware USB/debug o hardware USB de la placa.
 
-Un archivo de varios GB no demuestra por sí mismo corrupción. Primero verificar en el CSV:
+## Firmware e IDE
 
-- cuánto tiempo grabó realmente;
-- cuántos frames acumuló;
-- FPS efectivo;
-- si el tiempo de escritura aumentó;
-- si la grabación siguió mucho después de que el IDE dejó de mostrar imagen.
+El entorno observado inicialmente utiliza firmware OpenMV 4.7.0. Releases posteriores modificaron de forma sustancial framebuffer y protocolo USB/debug.
+
+Eso **no demuestra** que 4.7.0 sea la causa. Primero conviene registrar el comportamiento con la versión actual y recién después usar una actualización como ensayo A/B.
+
+Además, desde firmware 4.8.0 hubo cambios de API: entre ellos se eliminó `omv.disable_fb()`. En 5.0.0 OpenMV introdujo un protocolo host/cámara nuevo con canales separados para `stdio`, preview y datos, CRC y recuperación de secuencia; el IDE 5.0.0 también incorpora logging del protocolo de debug.
+
+## Documentación y antecedentes
+
+Las hipótesis y pruebas no salen sólo de inferencia. `docs/referencias.md` reúne:
+
+- documentación oficial de `omv`, `mjpeg`, `gc` y filesystem;
+- changelogs de firmware e IDE;
+- explicación histórica de cómo el IDE sondea el framebuffer por USB;
+- antecedentes del foro donde ejecución del script, terminal y framebuffer muestran comportamientos distintos.
+
+Los casos de foro se presentan como antecedentes análogos, no como prueba de que exista exactamente el mismo bug.
 
 ## Árbol de decisión
 
-Ver [`docs/arbol_decision.md`](docs/arbol_decision.md). Incluye un diagrama Mermaid y una versión textual para decidir qué prueba ejecutar según el resultado anterior.
+Ver [`docs/arbol_decision.md`](docs/arbol_decision.md).
 
-## Regla principal
-
-No asumir que un cuelgue de OpenMV IDE implica que la cámara dejó de grabar. Si el archivo de la microSD continúa creciendo mientras el IDE pierde conexión, el problema está probablemente en USB/Windows/IDE. Si la grabación también se detiene, el problema está más cerca de sensor, firmware, almacenamiento, alimentación o script.
-
-Ver también:
+## Documentación adicional
 
 - [`docs/protocolo_diagnostico.md`](docs/protocolo_diagnostico.md)
 - [`docs/interpretacion_resultados.md`](docs/interpretacion_resultados.md)
 - [`docs/arbol_decision.md`](docs/arbol_decision.md)
+- [`docs/referencias.md`](docs/referencias.md)
