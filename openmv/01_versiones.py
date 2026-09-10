@@ -2,11 +2,8 @@
 # 01_versiones.py
 #
 # OBJETIVO:
-# Mostrar información del firmware/runtime y comprobar que los
-# módulos básicos de OpenMV estén disponibles.
-#
-# NO modifica archivos.
-# NO graba video.
+# Mostrar información del firmware/runtime, modelo de placa y
+# disponibilidad de APIs relevantes para diagnóstico.
 # ============================================================
 
 import sys
@@ -41,13 +38,40 @@ try:
 except Exception as e:
     print("os.uname() no disponible:", e)
 
-print("\n[5] MODULOS OPENMV")
-for nombre in ("sensor", "mjpeg", "pyb", "machine"):
+print("\n[5] INFORMACION OPENMV")
+try:
+    import omv
+
+    for nombre in ("version_string", "board_type", "board_id", "arch"):
+        try:
+            valor = getattr(omv, nombre)()
+            print("%-16s: %s" % (nombre, valor))
+        except Exception as e:
+            print("%-16s: no disponible (%s)" % (nombre, e))
+
+    try:
+        print("disable_fb API  :", hasattr(omv, "disable_fb"))
+    except Exception:
+        pass
+
+except Exception as e:
+    print("Modulo omv no disponible:", e)
+
+print("\n[6] MODULOS OPENMV")
+for nombre in ("sensor", "mjpeg", "pyb", "machine", "omv"):
     try:
         __import__(nombre)
         print("OK    :", nombre)
     except Exception as e:
         print("ERROR :", nombre, "-", e)
+
+print("\n[7] CAPACIDADES MJPEG")
+try:
+    import mjpeg
+    print("Modulo mjpeg cargado correctamente")
+    print("NOTA: count(), size() y sync() dependen de la version del firmware.")
+except Exception as e:
+    print("ERROR cargando mjpeg:", e)
 
 print("\n========================================")
 print(" FIN DEL TEST")
