@@ -7,72 +7,88 @@
 | `01` falla | firmware/runtime/API incompatible o instalación dañada |
 | `02` falla | sensor, firmware o hardware; la SD todavía no participa |
 | `02` OK + `05` falla | almacenamiento/filesystem/microSD |
-| `02` OK + `05` OK + `07` falla | interacción captura + compresión + escritura |
+| `06` inestable sin grabación | sensor/firmware/rendimiento base |
+| `11_console_heartbeat.py` deja de reportar | `stdio`/debug/IDE aun sin cámara ni SD |
 | `06` estable + `07` lento | la escritura/SD introduce el cuello de botella |
-| todo OpenMV funciona pero IDE pierde conexión | USB/Windows/IDE |
+| IDE deja de reportar pero CSV/MJPEG siguen creciendo | ejecución de cámara sigue viva; concentrarse en IDE/debug/USB/framebuffer |
+| Windows registra desconexión USB | cable/puerto/energía/driver/USB firmware/hardware |
+| Windows no registra desconexión y el trabajo sigue | IDE/debug/framebuffer/stdio gana peso |
+| `10_framebuffer_off_test.py` elimina el problema | framebuffer/debug se vuelve variable causal plausible |
 | cámara reinicia espontáneamente | alimentación, firmware, excepción severa o hardware |
-| sólo fallan pruebas largas | problema intermitente, memoria, temperatura, alimentación o SD degradada |
 
 ## FPS
 
-No interpretar `DESIRED_FPS` como garantía. El script puede pedir 15 FPS, pero si captura + escritura tardan más de ~66 ms por frame, el FPS efectivo necesariamente cae.
-
-Para 15 FPS:
+No interpretar `DESIRED_FPS` como garantía. Para 15 FPS el presupuesto temporal es aproximadamente:
 
 ```text
-presupuesto temporal por frame ~= 1000 / 15 ~= 66.7 ms
+1000 / 15 ~= 66.7 ms por frame
 ```
 
-Ejemplo sano:
+Si captura + escritura supera ese tiempo, el FPS real necesariamente cae.
+
+## Tamaño del MJPEG
+
+Un archivo de varios GB no demuestra corrupción. Hay que mirar simultáneamente:
+
+- duración real;
+- frames escritos;
+- FPS efectivo;
+- `Mjpeg.size()` si la versión lo soporta;
+- tiempo medio y máximo de escritura.
+
+Dos grabaciones de igual duración no tienen por qué ocupar exactamente lo mismo: MJPEG comprime cada frame de forma independiente y el tamaño depende del contenido de imagen y de la compresión.
+
+## `Mjpeg.sync()`
+
+En versiones recientes OpenMV expone `Mjpeg.sync()` para forzar el volcado al disco sin cerrar el archivo. Las herramientas del repositorio lo usan sólo mediante detección de capacidad, para no romper firmware que no lo implemente.
+
+## Framebuffer y consola
+
+Framebuffer, terminal y ejecución del script son capas distintas.
+
+Casos útiles:
 
 ```text
-captura media:   20 ms
-escritura media: 10 ms
-ciclo:           30 ms
+terminal deja de imprimir
++ log persistente sigue creciendo
++ MJPEG sigue creciendo
 ```
 
-Hay margen para esperar hasta el siguiente frame.
-
-Ejemplo con cuello de botella:
+=> la ausencia de mensajes en pantalla no implica que el script haya parado.
 
 ```text
-captura media:   20 ms
-escritura media: 90 ms
-ciclo:          110 ms
+framebuffer deja de actualizarse
++ terminal sigue imprimiendo
 ```
 
-No es físicamente posible sostener 15 FPS en ese caso.
+=> problema concentrado en preview/framebuffer.
 
-## Espacio libre
+```text
+terminal + framebuffer paran
++ Windows mantiene el dispositivo
++ log persistente sigue creciendo
+```
 
-El script original estimaba el tamaño del video a partir de un frame JPEG y lo comparaba con un límite fijo de 4096 MB. Eso no demuestra que existan 4096 MB libres.
+=> sospecha fuerte sobre IDE/protocolo debug/stdio, no sobre la adquisición.
 
-Las herramientas nuevas consultan el filesystem real y reservan un margen de seguridad.
+## Firmware 4.7.x y `omv.disable_fb()`
+
+En ramas antiguas OpenMV documentaba `omv.disable_fb(True)` para impedir que la cámara enviara imágenes al IDE. Desde firmware 4.8.0 esa API fue eliminada.
+
+Por eso nunca hay que asumir que existe: los scripts la detectan antes de usarla.
 
 ## Memoria
 
-`gc.mem_free()` reporta memoria libre del heap administrado por MicroPython. No equivale a toda la RAM física ni incluye necesariamente buffers especiales de imagen. Su utilidad principal aquí es comparar estados y detectar degradación durante una prueba.
+`gc.mem_free()` reporta heap MicroPython, no toda la RAM física ni necesariamente buffers especiales de imagen. Se usa principalmente para comparar estados y detectar degradación.
 
 ## USB/Windows
 
-Un cuelgue del IDE y una detención de la grabación son eventos distintos.
+- IDE pierde conexión y Windows también pierde el dispositivo: priorizar USB físico/driver/energía/firmware.
+- IDE falla pero Windows mantiene USB y la cámara sigue escribiendo: priorizar IDE/debug/framebuffer/stdio.
+- ocurre en dos PCs distintas: reduce la probabilidad de un problema específico de una sola instalación de Windows, aunque no elimina cable, driver genérico o comportamiento del firmware.
 
-- IDE pierde conexión pero MJPEG continúa creciendo: sospechar USB/Windows/IDE.
-- MJPEG también se detiene: sospechar cámara/firmware/SD/alimentación/script.
-- dispositivo desaparece de PnP/COM: sospechar desconexión o reinicio físico/lógico.
-- dispositivo permanece estable pero IDE se congela: sospechar software del IDE o comunicación de depuración.
+## Evidencia y causalidad
 
-## Qué comparar entre ejecuciones
+Una mejora observada después de cambiar firmware, cable o configuración no prueba automáticamente la causa. Para atribuir causalidad, repetir un A/B cambiando una sola variable.
 
-Para una misma configuración, registrar:
-
-- FPS promedio;
-- captura media en ms;
-- escritura media en ms;
-- peor escritura en ms;
-- heap libre;
-- espacio libre;
-- timestamp de desconexiones USB;
-- tamaño final del MJPEG.
-
-No comparar pruebas realizadas con distinta resolución, formato, FPS o tarjeta SD como si fueran equivalentes.
+Ver `docs/referencias.md` para el origen documental de estas hipótesis.
